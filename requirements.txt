@@ -3,10 +3,9 @@ python-dotenv
 requests
 pypdf
 faiss-cpu
-
-langchain==0.3.27
-langchain-core==0.3.75
-langchain-community==0.3.29
-langchain-google-genai==2.1.9
-
 tavily-python
+
+langchain==0.3.30
+langchain-core==0.3.76
+langchain-community==0.3.30
+langchain-google-genai==2.1.10
