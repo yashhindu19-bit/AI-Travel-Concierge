@@ -32,15 +32,36 @@ from langchain_core.prompts import (
     MessagesPlaceholder,
 )
 
+import requests
+import os
+from dotenv import load_dotenv
+
+import sqlite3
+
+
 # =====================================================
 # Load Environment Variables
 # =====================================================
 
 load_dotenv()
 
+conn = sqlite3.connect("travel.db", check_same_thread=False)
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS search_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    query TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+""")
+
+conn.commit()
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 WEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
+GEOAPIFY_API_KEY = os.getenv("GEOAPIFY_API_KEY")
 
 if not GEMINI_API_KEY:
     st.error("❌ GEMINI_API_KEY not found.")
@@ -125,6 +146,126 @@ Humidity : {data['main']['humidity']} %
 
     except Exception as e:
         return str(e)
+    
+# =====================================================
+# HOTEL SEARCH FUNCTION
+# =====================================================
+
+def hotel_search(city):
+    try:
+        # Step 1: Find the city specifically in India
+        geo_url = "https://api.geoapify.com/v1/geocode/search"
+
+        geo_params = {
+            "text": city,
+            "type": "city",
+            "filter": "countrycode:in",
+            "limit": 1,
+            "apiKey": GEOAPIFY_API_KEY
+        }
+
+        geo_response = requests.get(
+            geo_url,
+            params=geo_params,
+            timeout=10
+        )
+
+        geo_data = geo_response.json()
+
+        if not geo_data.get("features"):
+            return f"❌ Could not find {city} in India."
+
+        location = geo_data["features"][0]["properties"]
+
+        lat = location["lat"]
+        lon = location["lon"]
+
+        # Step 2: Search hotels around the city
+        hotel_url = "https://api.geoapify.com/v2/places"
+
+        hotel_params = {
+            "categories": "accommodation.hotel",
+            "filter": f"circle:{lon},{lat},25000",
+            "limit": 10,
+            "apiKey": GEOAPIFY_API_KEY
+        }
+
+        hotel_response = requests.get(
+            hotel_url,
+            params=hotel_params,
+            timeout=10
+        )
+
+        hotel_data = hotel_response.json()
+
+        if not hotel_data.get("features"):
+            return f"❌ No hotels found in {city}."
+
+        result = f"🏨 Hotels in {city.title()}\n\n"
+
+        for place in hotel_data["features"]:
+            props = place["properties"]
+
+            name = props.get("name", "Hotel")
+
+            address = props.get(
+                "formatted",
+                "Address not available"
+            )
+
+            result += (
+                f"🏨 **{name}**\n"
+                f"📍 {address}\n\n"
+            )
+
+        return result
+
+    except Exception as e:
+        return f"❌ Hotel search error: {e}"
+    
+   # Save Search 
+
+def save_search(query):
+    cursor.execute(
+        "INSERT INTO search_history(query) VALUES(?)",
+        (query,)
+    )
+    conn.commit()
+    
+def get_history():
+    cursor.execute("""
+        SELECT query, created_at
+        FROM search_history
+        ORDER BY id DESC
+    """)
+    return cursor.fetchall()
+
+# =====================================================
+# AI ITINERARY GENERATOR
+# =====================================================
+
+def generate_itinerary(city, days):
+
+    prompt = f"""
+Create a practical {days}-day travel itinerary for {city}.
+
+For each day include:
+- Morning activities
+- Afternoon activities
+- Evening activities
+- Popular attractions
+- Local food suggestions
+
+Keep the plan clear and easy to follow.
+Do not invent exact ticket prices or opening hours.
+"""
+
+    try:
+        response = llm.invoke(prompt)
+        return response.content
+
+    except Exception as e:
+        return f"❌ Unable to generate itinerary: {e}"
 
 # =====================================================
 # LangChain Tools
@@ -140,6 +281,12 @@ weather_tool = Tool(
     name="weather_search",
     func=weather_search,
     description="Get current weather information for a city."
+)
+
+hotel_tool = Tool(
+    name="hotel_search",
+    func=hotel_search,
+    description="Search hotels in any city."
 )   
 
 # Initial tools
@@ -147,6 +294,7 @@ weather_tool = Tool(
 tools = [
     web_tool,
     weather_tool,
+    hotel_tool,
 ]
 
 # =====================================================
@@ -160,6 +308,11 @@ st.set_page_config(
 )
 
 st.title("🌍 AI Travel Concierge")
+
+page = st.sidebar.selectbox(
+    "Navigation",
+    ["Travel Assistant", "Search History", "AI Itinerary"]
+)
 
 st.write(
     "Upload your travel guide PDF and ask any travel-related question."
@@ -269,8 +422,11 @@ You have access to the following tools:
 
 2. Weather Search
    - Use for current weather of any city.
+   
+3. Hotel Search
+   - Use for finding hotels in a city.
 
-3. PDF Search
+4. PDF Search
    - Use whenever the answer can be found in the uploaded travel PDF.
 
 Always choose the best tool before answering.
@@ -302,9 +458,70 @@ st.divider()
 
 st.subheader("💬 Travel Assistant")
 
+if page == "AI Itinerary":
+
+    st.header("🗺️ AI Travel Itinerary")
+
+    city = st.text_input(
+        "Enter destination",
+        placeholder="e.g. Jaipur"
+    )
+
+    days = st.number_input(
+        "Number of days",
+        min_value=1,
+        max_value=15,
+        value=3
+    )
+
+    if st.button("✨ Generate Itinerary"):
+
+        if city.strip():
+
+            with st.spinner("Creating your itinerary..."):
+
+                itinerary = generate_itinerary(
+                    city,
+                    days
+                )
+
+            st.markdown(itinerary)
+
+            save_search(
+                f"Itinerary: {city} - {days} days"
+            )
+
+        else:
+
+            st.warning("Please enter a destination.")
+
+    st.stop()
+
+if page == "Search History":
+
+    st.header("📜 Search History")
+
+    history = get_history()
+
+    if history:
+
+        for query, date in history:
+
+            st.write(f"🕒 {date}")
+            st.write(f"🔍 {query}")
+            st.divider()
+
+    else:
+
+        st.info("No search history found.")
+
+    st.stop()
+
 user_input = st.chat_input("Ask your travel question...")
 
 if user_input:
+    
+    save_search(user_input)
 
     st.chat_message("user").write(user_input)
 
@@ -325,3 +542,5 @@ if user_input:
         except Exception as e:
 
             st.error(f"❌ {e}")
+            
+           
