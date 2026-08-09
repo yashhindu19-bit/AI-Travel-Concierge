@@ -1,3 +1,11 @@
-.env
+# Python virtual environment
 venv/
+
+# Python cache
 __pycache__/
+
+# Environment variables
+.env
+
+# Local SQLite database
+travel.db
