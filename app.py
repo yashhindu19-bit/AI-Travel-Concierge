@@ -3,11 +3,13 @@ import os
 import tempfile
 import requests
 import asyncio
+import sqlite3
 
 try:
     asyncio.get_event_loop()
 except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
+
 from dotenv import load_dotenv
 
 from tavily import TavilyClient
@@ -32,12 +34,6 @@ from langchain_core.prompts import (
     MessagesPlaceholder,
 )
 
-import requests
-import os
-from dotenv import load_dotenv
-
-import sqlite3
-
 
 # =====================================================
 # Load Environment Variables
@@ -45,7 +41,21 @@ import sqlite3
 
 load_dotenv()
 
-conn = sqlite3.connect("travel.db", check_same_thread=False)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
+WEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
+GEOAPIFY_API_KEY = os.getenv("GEOAPIFY_API_KEY")
+
+
+# =====================================================
+# SQLite Database
+# =====================================================
+
+conn = sqlite3.connect(
+    "travel.db",
+    check_same_thread=False
+)
+
 cursor = conn.cursor()
 
 cursor.execute("""
@@ -58,10 +68,10 @@ CREATE TABLE IF NOT EXISTS search_history (
 
 conn.commit()
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
-WEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
-GEOAPIFY_API_KEY = os.getenv("GEOAPIFY_API_KEY")
+
+# =====================================================
+# API Key Checks
+# =====================================================
 
 if not GEMINI_API_KEY:
     st.error("❌ GEMINI_API_KEY not found.")
@@ -75,6 +85,11 @@ if not WEATHER_API_KEY:
     st.error("❌ OPENWEATHER_API_KEY not found.")
     st.stop()
 
+if not GEOAPIFY_API_KEY:
+    st.error("❌ GEOAPIFY_API_KEY not found.")
+    st.stop()
+
+
 # =====================================================
 # Gemini LLM
 # =====================================================
@@ -85,6 +100,7 @@ llm = ChatGoogleGenerativeAI(
     temperature=0.3,
 )
 
+
 # =====================================================
 # Tavily Client
 # =====================================================
@@ -92,6 +108,7 @@ llm = ChatGoogleGenerativeAI(
 tavily = TavilyClient(
     api_key=TAVILY_API_KEY
 )
+
 
 # =====================================================
 # Web Search Function
@@ -109,7 +126,9 @@ def web_search(query):
         return str(result)
 
     except Exception as e:
+
         return str(e)
+
 
 # =====================================================
 # Weather Search Function
@@ -127,40 +146,63 @@ def weather_search(city):
 
     try:
 
-        response = requests.get(url, params=params)
+        response = requests.get(
+            url,
+            params=params,
+            timeout=10
+        )
 
         data = response.json()
 
         if response.status_code != 200:
-            return data.get("message", "City not found")
+
+            return data.get(
+                "message",
+                "City not found"
+            )
 
         return f"""
-City : {data['name']}
+🌤️ Weather Information
 
-Temperature : {data['main']['temp']} °C
+City: {data['name']}
 
-Weather : {data['weather'][0]['description']}
+🌡️ Temperature: {data['main']['temp']} °C
 
-Humidity : {data['main']['humidity']} %
+☁️ Weather: {data['weather'][0]['description']}
+
+💧 Humidity: {data['main']['humidity']} %
 """
 
     except Exception as e:
+
         return str(e)
-    
+
+
 # =====================================================
-# HOTEL SEARCH FUNCTION
+# Hotel Search Function
 # =====================================================
 
 def hotel_search(city):
+
     try:
-        # Step 1: Find the city specifically in India
-        geo_url = "https://api.geoapify.com/v1/geocode/search"
+
+        # Step 1: Find city in India
+
+        geo_url = (
+            "https://api.geoapify.com/"
+            "v1/geocode/search"
+        )
 
         geo_params = {
+
             "text": city,
+
             "type": "city",
+
             "filter": "countrycode:in",
+
             "limit": 1,
+
             "apiKey": GEOAPIFY_API_KEY
         }
 
@@ -173,21 +215,38 @@ def hotel_search(city):
         geo_data = geo_response.json()
 
         if not geo_data.get("features"):
-            return f"❌ Could not find {city} in India."
 
-        location = geo_data["features"][0]["properties"]
+            return (
+                f"❌ Could not find "
+                f"{city} in India."
+            )
+
+        location = (
+            geo_data["features"][0]["properties"]
+        )
 
         lat = location["lat"]
         lon = location["lon"]
 
-        # Step 2: Search hotels around the city
-        hotel_url = "https://api.geoapify.com/v2/places"
+
+        # Step 2: Search hotels
+
+        hotel_url = (
+            "https://api.geoapify.com/v2/places"
+        )
 
         hotel_params = {
-            "categories": "accommodation.hotel",
-            "filter": f"circle:{lon},{lat},25000",
+
+            "categories":
+                "accommodation.hotel",
+
+            "filter":
+                f"circle:{lon},{lat},25000",
+
             "limit": 10,
-            "apiKey": GEOAPIFY_API_KEY
+
+            "apiKey":
+                GEOAPIFY_API_KEY
         }
 
         hotel_response = requests.get(
@@ -199,14 +258,26 @@ def hotel_search(city):
         hotel_data = hotel_response.json()
 
         if not hotel_data.get("features"):
-            return f"❌ No hotels found in {city}."
 
-        result = f"🏨 Hotels in {city.title()}\n\n"
+            return (
+                f"❌ No hotels found "
+                f"in {city}."
+            )
+
+
+        result = (
+            f"🏨 Hotels in "
+            f"{city.title()}\n\n"
+        )
 
         for place in hotel_data["features"]:
+
             props = place["properties"]
 
-            name = props.get("name", "Hotel")
+            name = props.get(
+                "name",
+                "Hotel"
+            )
 
             address = props.get(
                 "formatted",
@@ -220,36 +291,63 @@ def hotel_search(city):
 
         return result
 
+
     except Exception as e:
-        return f"❌ Hotel search error: {e}"
-    
-   # Save Search 
+
+        return (
+            f"❌ Hotel search error: {e}"
+        )
+
+
+# =====================================================
+# Save Search
+# =====================================================
 
 def save_search(query):
+
     cursor.execute(
-        "INSERT INTO search_history(query) VALUES(?)",
+        """
+        INSERT INTO search_history(query)
+        VALUES(?)
+        """,
         (query,)
     )
+
     conn.commit()
-    
+
+
+# =====================================================
+# Get Search History
+# =====================================================
+
 def get_history():
-    cursor.execute("""
+
+    cursor.execute(
+        """
         SELECT query, created_at
         FROM search_history
         ORDER BY id DESC
-    """)
+        """
+    )
+
     return cursor.fetchall()
 
+
 # =====================================================
-# AI ITINERARY GENERATOR
+# AI Itinerary Generator
 # =====================================================
 
-def generate_itinerary(city, days):
+def generate_itinerary(
+    city,
+    days
+):
 
     prompt = f"""
-Create a practical {days}-day travel itinerary for {city}.
+Create a practical {days}-day
+travel itinerary for {city}.
 
 For each day include:
+
 - Morning activities
 - Afternoon activities
 - Evening activities
@@ -257,15 +355,26 @@ For each day include:
 - Local food suggestions
 
 Keep the plan clear and easy to follow.
-Do not invent exact ticket prices or opening hours.
+
+Do not invent exact ticket prices
+or opening hours.
 """
 
     try:
-        response = llm.invoke(prompt)
+
+        response = llm.invoke(
+            prompt
+        )
+
         return response.content
 
     except Exception as e:
-        return f"❌ Unable to generate itinerary: {e}"
+
+        return (
+            f"❌ Unable to generate "
+            f"itinerary: {e}"
+        )
+
 
 # =====================================================
 # LangChain Tools
@@ -274,22 +383,31 @@ Do not invent exact ticket prices or opening hours.
 web_tool = Tool(
     name="web_search",
     func=web_search,
-    description="Search latest travel information from the internet."
+    description=(
+        "Search latest travel "
+        "information from the internet."
+    )
 )
+
 
 weather_tool = Tool(
     name="weather_search",
     func=weather_search,
-    description="Get current weather information for a city."
+    description=(
+        "Get current weather "
+        "information for a city."
+    )
 )
+
 
 hotel_tool = Tool(
     name="hotel_search",
     func=hotel_search,
-    description="Search hotels in any city."
-)   
+    description=(
+        "Search hotels in any city."
+    )
+)
 
-# Initial tools
 
 tools = [
     web_tool,
@@ -297,8 +415,9 @@ tools = [
     hotel_tool,
 ]
 
+
 # =====================================================
-# Streamlit UI
+# Streamlit Page Configuration
 # =====================================================
 
 st.set_page_config(
@@ -307,240 +426,493 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🌍 AI Travel Concierge")
-
-page = st.sidebar.selectbox(
-    "Navigation",
-    ["Travel Assistant", "Search History", "AI Itinerary"]
-)
-
-st.write(
-    "Upload your travel guide PDF and ask any travel-related question."
-)
-
-uploaded_file = st.file_uploader(
-    "Upload Travel PDF",
-    type=["pdf"]
-)
-
-retriever = None
-pdf_tool = None
 
 # =====================================================
-# Process Uploaded PDF
+# Sidebar Navigation
 # =====================================================
 
-if uploaded_file is not None:
+with st.sidebar:
 
-    # Save uploaded PDF temporarily
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-        tmp_file.write(uploaded_file.getvalue())
-        pdf_path = tmp_file.name
+    st.header("🧭 Navigation")
 
-    # Load PDF
-    loader = PyPDFLoader(pdf_path)
-    documents = loader.load()
-
-    # Split into chunks
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200
+    page = st.radio(
+        "Choose a section:",
+        [
+            "🏠 Home",
+            "💬 Travel Assistant",
+            "📜 Search History"
+        ]
     )
 
-    chunks = splitter.split_documents(documents)
 
-    # Gemini Embeddings
-    embeddings = GoogleGenerativeAIEmbeddings(
-        model="gemini-embedding-001",
-        google_api_key=GEMINI_API_KEY
+# =====================================================
+# HOME PAGE
+# =====================================================
+
+if page == "🏠 Home":
+
+    st.title(
+        "🌍 Welcome to AI Travel Concierge"
     )
 
-    # Create FAISS Vector Store
-    vectorstore = FAISS.from_documents(
-        documents=chunks,
-        embedding=embeddings
+    st.caption(
+        "Your AI-powered personal travel assistant."
     )
 
-    # Create Retriever
-    retriever = vectorstore.as_retriever(
-        search_kwargs={"k": 3}
+    st.markdown(
+        """
+        ### ✈️ What can you do?
+
+        - 🏨 Search hotels
+        - 🌤️ Check current weather
+        - 🔎 Search travel information
+        - 📄 Ask questions from travel PDFs
+        - 🗺️ Generate AI travel itineraries
+        - 📜 View your search history
+        """
     )
 
-    # =====================================================
-    # PDF Search Function
-    # =====================================================
+    st.info(
+        "💡 Select **Travel Assistant** "
+        "from the sidebar to start "
+        "planning your trip."
+    )
 
-    def pdf_search(query):
+    st.divider()
 
-        docs = retriever.invoke(query)
+    st.success(
+        "✅ AI Travel Concierge is ready!"
+    )
 
-        if not docs:
-            return "No relevant information found in the uploaded PDF."
 
-        return "\n\n".join(
-            doc.page_content
-            for doc in docs
+# =====================================================
+# TRAVEL ASSISTANT PAGE
+# =====================================================
+
+elif page == "💬 Travel Assistant":
+
+    st.title(
+        "💬 Travel Assistant"
+    )
+
+    st.caption(
+        "Ask about hotels, weather, "
+        "destinations, itineraries, "
+        "or your uploaded travel PDF."
+    )
+
+    st.info(
+        "💡 Try: 'Find hotels in Delhi', "
+        "'Weather in Jaipur', or "
+        "'Best places to visit in Manali'."
+    )
+
+    st.divider()
+
+
+    # =================================================
+    # PDF UPLOAD
+    # =================================================
+
+    st.subheader(
+        "📄 Travel Guide"
+    )
+
+    st.caption(
+        "Upload a travel guide PDF to "
+        "get answers directly from "
+        "your document."
+    )
+
+    uploaded_file = st.file_uploader(
+        "Choose a PDF file",
+        type=["pdf"],
+        help=(
+            "Upload your travel guide "
+            "in PDF format."
+        ),
+        key="travel_pdf"
+    )
+
+
+    retriever = None
+    pdf_tool = None
+
+
+    # =================================================
+    # PROCESS PDF
+    # =================================================
+
+    if uploaded_file is not None:
+
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=".pdf"
+        ) as tmp_file:
+
+            tmp_file.write(
+                uploaded_file.getvalue()
+            )
+
+            pdf_path = tmp_file.name
+
+
+        # Load PDF
+
+        loader = PyPDFLoader(
+            pdf_path
         )
 
-    # =====================================================
-    # PDF Tool
-    # =====================================================
+        documents = loader.load()
 
-    pdf_tool = Tool(
-    name="pdf_search",
-    func=pdf_search,
-    description="Search information from the uploaded travel PDF."
-)
 
-    # Add PDF tool only once
-    if pdf_tool not in tools:
-        tools.append(pdf_tool)
+        # Split PDF
 
-    # Success Message
-    st.success("✅ PDF uploaded successfully!")
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=200
+        )
 
-    st.write(f"**Total Chunks :** {len(chunks)}")
+        chunks = splitter.split_documents(
+            documents
+        )
 
-    st.subheader("📄 PDF Preview")
 
-    st.write(documents[0].page_content[:700])
-    
-    # =====================================================
-# Create Agent
-# =====================================================
+        # Gemini Embeddings
 
-prompt = ChatPromptTemplate.from_messages(
-    [
-        (
-            "system",
-            """You are an AI Travel Concierge.
+        embeddings = (
+            GoogleGenerativeAIEmbeddings(
+                model="gemini-embedding-001",
+                google_api_key=GEMINI_API_KEY
+            )
+        )
+
+
+        # FAISS Vector Store
+
+        vectorstore = FAISS.from_documents(
+            documents=chunks,
+            embedding=embeddings
+        )
+
+
+        # Retriever
+
+        retriever = (
+            vectorstore.as_retriever(
+                search_kwargs={
+                    "k": 3
+                }
+            )
+        )
+
+
+        # =============================================
+        # PDF SEARCH FUNCTION
+        # =============================================
+
+        def pdf_search(query):
+
+            docs = retriever.invoke(
+                query
+            )
+
+            if not docs:
+
+                return (
+                    "No relevant information "
+                    "found in the uploaded PDF."
+                )
+
+            return "\n\n".join(
+                doc.page_content
+                for doc in docs
+            )
+
+
+        # =============================================
+        # PDF TOOL
+        # =============================================
+
+        pdf_tool = Tool(
+            name="pdf_search",
+            func=pdf_search,
+            description=(
+                "Search information from "
+                "the uploaded travel PDF."
+            )
+        )
+
+
+        if pdf_tool not in tools:
+
+            tools.append(
+                pdf_tool
+            )
+
+
+        st.success(
+            "✅ PDF uploaded successfully!"
+        )
+
+        st.write(
+            f"**Total Chunks:** "
+            f"{len(chunks)}"
+        )
+
+        st.subheader(
+            "📄 PDF Preview"
+        )
+
+        st.write(
+            documents[0]
+            .page_content[:700]
+        )
+
+
+    # =================================================
+    # CREATE AGENT
+    # =================================================
+
+    prompt = ChatPromptTemplate.from_messages(
+        [
+
+            (
+                "system",
+
+                """
+You are an AI Travel Concierge.
 
 You have access to the following tools:
 
 1. Web Search
-   - Use for latest travel information, attractions, hotels, visas, etc.
+   - Use for latest travel information,
+     attractions, hotels, visas, etc.
 
 2. Weather Search
-   - Use for current weather of any city.
-   
+   - Use for current weather
+     of any city.
+
 3. Hotel Search
-   - Use for finding hotels in a city.
+   - Use for finding hotels
+     in a city.
 
 4. PDF Search
-   - Use whenever the answer can be found in the uploaded travel PDF.
+   - Use whenever the answer can
+     be found in the uploaded
+     travel PDF.
 
-Always choose the best tool before answering.
-If no tool is required, answer normally.
-""",
-        ),
-        ("human", "{input}"),
-        MessagesPlaceholder(variable_name="agent_scratchpad"),
-    ]
-)
+Always choose the best tool
+before answering.
 
-agent = create_tool_calling_agent(
-    llm=llm,
-    tools=tools,
-    prompt=prompt,
-)
+If no tool is required,
+answer normally.
+"""
+            ),
 
-agent_executor = AgentExecutor(
-    agent=agent,
-    tools=tools,
-    verbose=True,
-)
+            (
+                "human",
+                "{input}"
+            ),
 
-# =====================================================
-# Chat Interface
-# =====================================================
-
-st.divider()
-
-st.subheader("💬 Travel Assistant")
-
-if page == "AI Itinerary":
-
-    st.header("🗺️ AI Travel Itinerary")
-
-    city = st.text_input(
-        "Enter destination",
-        placeholder="e.g. Jaipur"
+            MessagesPlaceholder(
+                variable_name="agent_scratchpad"
+            ),
+        ]
     )
 
-    days = st.number_input(
-        "Number of days",
-        min_value=1,
-        max_value=15,
-        value=3
+
+    agent = create_tool_calling_agent(
+        llm=llm,
+        tools=tools,
+        prompt=prompt,
     )
 
-    if st.button("✨ Generate Itinerary"):
 
-        if city.strip():
+    agent_executor = AgentExecutor(
+        agent=agent,
+        tools=tools,
+        verbose=True,
+    )
 
-            with st.spinner("Creating your itinerary..."):
 
-                itinerary = generate_itinerary(
-                    city,
-                    days
+    # =================================================
+    # AI ITINERARY GENERATOR
+    # =================================================
+
+    st.divider()
+
+    st.subheader(
+        "🗺️ AI Itinerary Generator"
+    )
+
+    col1, col2 = st.columns(2)
+
+
+    with col1:
+
+        destination = st.text_input(
+            "📍 Destination",
+            placeholder="e.g. Jaipur",
+            key="itinerary_destination"
+        )
+
+
+    with col2:
+
+        days = st.number_input(
+            "📅 Number of Days",
+            min_value=1,
+            max_value=15,
+            value=3,
+            key="itinerary_days"
+        )
+
+
+    if st.button(
+        "✨ Generate Itinerary",
+        key="generate_itinerary_button"
+    ):
+
+        if destination.strip():
+
+            with st.spinner(
+                "Creating your itinerary..."
+            ):
+
+                itinerary = (
+                    generate_itinerary(
+                        destination,
+                        days
+                    )
                 )
 
-            st.markdown(itinerary)
+
+            st.success(
+                "✅ Itinerary generated!"
+            )
+
+            st.markdown(
+                itinerary
+            )
+
 
             save_search(
-                f"Itinerary: {city} - {days} days"
+                f"Itinerary: "
+                f"{destination} - "
+                f"{days} days"
             )
+
+
+            st.download_button(
+                label="📥 Download Itinerary",
+                data=itinerary,
+                file_name=(
+                    f"{destination}_"
+                    f"itinerary.txt"
+                ),
+                mime="text/plain",
+                key="download_itinerary"
+            )
+
 
         else:
 
-            st.warning("Please enter a destination.")
+            st.warning(
+                "Please enter a destination."
+            )
 
-    st.stop()
 
-if page == "Search History":
+    # =================================================
+    # CHAT INTERFACE
+    # =================================================
 
-    st.header("📜 Search History")
+    st.divider()
+
+    st.subheader(
+        "💬 Ask Your Travel Question"
+    )
+
+    user_input = st.chat_input(
+        "Ask your travel question..."
+    )
+
+
+    if user_input:
+
+        save_search(
+            user_input
+        )
+
+
+        st.chat_message(
+            "user"
+        ).write(
+            user_input
+        )
+
+
+        with st.spinner(
+            "Thinking..."
+        ):
+
+            try:
+
+                response = (
+                    agent_executor.invoke(
+                        {
+                            "input": user_input
+                        }
+                    )
+                )
+
+
+                with st.chat_message(
+                    "assistant"
+                ):
+
+                    st.markdown(
+                        response["output"]
+                    )
+
+
+            except Exception as e:
+
+                st.error(
+                    f"❌ {e}"
+                )
+
+
+# =====================================================
+# SEARCH HISTORY PAGE
+# =====================================================
+
+elif page == "📜 Search History":
+
+    st.title(
+        "📜 Search History"
+    )
 
     history = get_history()
 
+
     if history:
 
-        for query, date in history:
+        for query, created_at in history:
 
-            st.write(f"🕒 {date}")
-            st.write(f"🔍 {query}")
+            st.markdown(
+                f"🕒 **{created_at}**"
+            )
+
+            st.write(
+                f"🔍 {query}"
+            )
+
             st.divider()
+
 
     else:
 
-        st.info("No search history found.")
-
-    st.stop()
-
-user_input = st.chat_input("Ask your travel question...")
-
-if user_input:
-    
-    save_search(user_input)
-
-    st.chat_message("user").write(user_input)
-
-    with st.spinner("Thinking..."):
-
-        try:
-
-            response = agent_executor.invoke(
-                {
-                    "input": user_input
-                }
-            )
-
-            st.chat_message("assistant").write(
-                response["output"]
-            )
-
-        except Exception as e:
-
-            st.error(f"❌ {e}")
-            
-           
+        st.info(
+            "No search history found."
+        )
