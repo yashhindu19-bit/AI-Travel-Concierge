@@ -36,7 +36,79 @@ from langchain_core.prompts import (
 
 
 # =====================================================
-# Load Environment Variables
+# STREAMLIT CONFIG
+# =====================================================
+
+st.set_page_config(
+    page_title="AI Travel Concierge",
+    page_icon="🌍",
+    layout="wide"
+)
+
+
+# =====================================================
+# CUSTOM CSS
+# =====================================================
+
+st.markdown("""
+<style>
+
+.main-title {
+    text-align: center;
+    font-size: 46px;
+    font-weight: 800;
+    margin-bottom: 5px;
+}
+
+.main-subtitle {
+    text-align: center;
+    font-size: 19px;
+    margin-bottom: 25px;
+}
+
+.hero {
+    padding: 35px;
+    border-radius: 20px;
+    text-align: center;
+    margin-bottom: 25px;
+}
+
+.feature-card {
+    padding: 22px;
+    border-radius: 16px;
+    border: 1px solid rgba(128,128,128,0.25);
+    min-height: 150px;
+    margin-bottom: 15px;
+}
+
+.feature-card h3 {
+    margin-bottom: 8px;
+}
+
+.feature-card p {
+    font-size: 14px;
+    opacity: 0.8;
+}
+
+.section-title {
+    font-size: 28px;
+    font-weight: 700;
+    margin-top: 20px;
+    margin-bottom: 15px;
+}
+
+.stButton > button {
+    width: 100%;
+    border-radius: 10px;
+    font-weight: 600;
+}
+
+</style>
+""", unsafe_allow_html=True)
+
+
+# =====================================================
+# ENVIRONMENT VARIABLES
 # =====================================================
 
 load_dotenv()
@@ -48,29 +120,7 @@ GEOAPIFY_API_KEY = os.getenv("GEOAPIFY_API_KEY")
 
 
 # =====================================================
-# SQLite Database
-# =====================================================
-
-conn = sqlite3.connect(
-    "travel.db",
-    check_same_thread=False
-)
-
-cursor = conn.cursor()
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS search_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    query TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
-""")
-
-conn.commit()
-
-
-# =====================================================
-# API Key Checks
+# API KEY CHECK
 # =====================================================
 
 if not GEMINI_API_KEY:
@@ -91,7 +141,55 @@ if not GEOAPIFY_API_KEY:
 
 
 # =====================================================
-# Gemini LLM
+# SQLITE DATABASE
+# =====================================================
+
+conn = sqlite3.connect(
+    "travel.db",
+    check_same_thread=False
+)
+
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS search_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    query TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+""")
+
+conn.commit()
+
+
+def save_search(query):
+
+    cursor.execute(
+        """
+        INSERT INTO search_history(query)
+        VALUES(?)
+        """,
+        (query,)
+    )
+
+    conn.commit()
+
+
+def get_history():
+
+    cursor.execute(
+        """
+        SELECT query, created_at
+        FROM search_history
+        ORDER BY id DESC
+        """
+    )
+
+    return cursor.fetchall()
+
+
+# =====================================================
+# GEMINI
 # =====================================================
 
 llm = ChatGoogleGenerativeAI(
@@ -102,7 +200,7 @@ llm = ChatGoogleGenerativeAI(
 
 
 # =====================================================
-# Tavily Client
+# TAVILY
 # =====================================================
 
 tavily = TavilyClient(
@@ -111,7 +209,7 @@ tavily = TavilyClient(
 
 
 # =====================================================
-# Web Search Function
+# WEB SEARCH
 # =====================================================
 
 def web_search(query):
@@ -127,21 +225,24 @@ def web_search(query):
 
     except Exception as e:
 
-        return str(e)
+        return f"Web search error: {e}"
 
 
 # =====================================================
-# Weather Search Function
+# WEATHER SEARCH
 # =====================================================
 
 def weather_search(city):
 
-    url = "https://api.openweathermap.org/data/2.5/weather"
+    url = (
+        "https://api.openweathermap.org/"
+        "data/2.5/weather"
+    )
 
     params = {
         "q": city,
         "appid": WEATHER_API_KEY,
-        "units": "metric",
+        "units": "metric"
     }
 
     try:
@@ -162,31 +263,31 @@ def weather_search(city):
             )
 
         return f"""
-🌤️ Weather Information
+🌤️ **Weather Information**
 
-City: {data['name']}
+**City:** {data['name']}
 
-🌡️ Temperature: {data['main']['temp']} °C
+🌡️ **Temperature:** {data['main']['temp']} °C
 
-☁️ Weather: {data['weather'][0]['description']}
+☁️ **Weather:** {data['weather'][0]['description']}
 
-💧 Humidity: {data['main']['humidity']} %
+💧 **Humidity:** {data['main']['humidity']} %
 """
 
     except Exception as e:
 
-        return str(e)
+        return f"❌ Weather error: {e}"
 
 
 # =====================================================
-# Hotel Search Function
+# HOTEL SEARCH
 # =====================================================
 
 def hotel_search(city):
 
     try:
 
-        # Step 1: Find city in India
+        # Find city in India
 
         geo_url = (
             "https://api.geoapify.com/"
@@ -194,15 +295,10 @@ def hotel_search(city):
         )
 
         geo_params = {
-
             "text": city,
-
             "type": "city",
-
             "filter": "countrycode:in",
-
             "limit": 1,
-
             "apiKey": GEOAPIFY_API_KEY
         }
 
@@ -229,14 +325,13 @@ def hotel_search(city):
         lon = location["lon"]
 
 
-        # Step 2: Search hotels
+        # Search hotels
 
         hotel_url = (
             "https://api.geoapify.com/v2/places"
         )
 
         hotel_params = {
-
             "categories":
                 "accommodation.hotel",
 
@@ -266,9 +361,10 @@ def hotel_search(city):
 
 
         result = (
-            f"🏨 Hotels in "
+            f"## 🏨 Hotels in "
             f"{city.title()}\n\n"
         )
+
 
         for place in hotel_data["features"]:
 
@@ -300,41 +396,7 @@ def hotel_search(city):
 
 
 # =====================================================
-# Save Search
-# =====================================================
-
-def save_search(query):
-
-    cursor.execute(
-        """
-        INSERT INTO search_history(query)
-        VALUES(?)
-        """,
-        (query,)
-    )
-
-    conn.commit()
-
-
-# =====================================================
-# Get Search History
-# =====================================================
-
-def get_history():
-
-    cursor.execute(
-        """
-        SELECT query, created_at
-        FROM search_history
-        ORDER BY id DESC
-        """
-    )
-
-    return cursor.fetchall()
-
-
-# =====================================================
-# AI Itinerary Generator
+# ITINERARY GENERATOR
 # =====================================================
 
 def generate_itinerary(
@@ -343,21 +405,21 @@ def generate_itinerary(
 ):
 
     prompt = f"""
-Create a practical {days}-day
-travel itinerary for {city}.
+Create a practical {days}-day travel itinerary
+for {city}.
 
 For each day include:
 
+### Day X
 - Morning activities
 - Afternoon activities
 - Evening activities
 - Popular attractions
 - Local food suggestions
 
-Keep the plan clear and easy to follow.
+Keep the plan clear, practical and easy to follow.
 
-Do not invent exact ticket prices
-or opening hours.
+Do not invent exact ticket prices or opening hours.
 """
 
     try:
@@ -377,15 +439,15 @@ or opening hours.
 
 
 # =====================================================
-# LangChain Tools
+# LANGCHAIN TOOLS
 # =====================================================
 
 web_tool = Tool(
     name="web_search",
     func=web_search,
     description=(
-        "Search latest travel "
-        "information from the internet."
+        "Search latest travel information "
+        "from the internet."
     )
 )
 
@@ -394,8 +456,8 @@ weather_tool = Tool(
     name="weather_search",
     func=weather_search,
     description=(
-        "Get current weather "
-        "information for a city."
+        "Get current weather information "
+        "for a city."
     )
 )
 
@@ -409,26 +471,96 @@ hotel_tool = Tool(
 )
 
 
-tools = [
+# =====================================================
+# BASE AGENT
+# =====================================================
+
+base_tools = [
     web_tool,
     weather_tool,
     hotel_tool,
 ]
 
+base_agent_prompt = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            """
+You are an AI Travel Concierge.
 
-# =====================================================
-# Streamlit Page Configuration
-# =====================================================
+You have access to these tools:
 
-st.set_page_config(
-    page_title="AI Travel Concierge",
-    page_icon="🌍",
-    layout="wide"
+1. Web Search
+   - Use for latest travel information,
+     attractions, hotels, visas, etc.
+
+2. Weather Search
+   - Use for current weather
+     of any city.
+
+3. Hotel Search
+   - Use for finding hotels
+     in a city.
+
+Give clear, practical and useful
+travel answers.
+
+If a tool is needed, use the
+appropriate tool before answering.
+"""
+        ),
+        (
+            "human",
+            "{input}"
+        ),
+        MessagesPlaceholder(
+            variable_name="agent_scratchpad"
+        ),
+    ]
+)
+
+base_agent = create_tool_calling_agent(
+    llm=llm,
+    tools=base_tools,
+    prompt=base_agent_prompt,
+)
+
+base_agent_executor = AgentExecutor(
+    agent=base_agent,
+    tools=base_tools,
+    verbose=True,
 )
 
 
 # =====================================================
-# Sidebar Navigation
+# AUTO SCROLL HELPER
+# =====================================================
+
+def auto_scroll_to_answer():
+    st.components.v1.html(
+        """
+        <script>
+        setTimeout(function() {
+            try {
+                window.parent.scrollTo({
+                    top: document.body.scrollHeight,
+                    behavior: "smooth"
+                });
+            } catch (e) {
+                window.scrollTo({
+                    top: document.body.scrollHeight,
+                    behavior: "smooth"
+                });
+            }
+        }, 300);
+        </script>
+        """,
+        height=0,
+    )
+
+
+# =====================================================
+# SIDEBAR NAVIGATION
 # =====================================================
 
 with st.sidebar:
@@ -451,37 +583,200 @@ with st.sidebar:
 
 if page == "🏠 Home":
 
-    st.title(
-        "🌍 Welcome to AI Travel Concierge"
+    st.markdown(
+        '<div class="hero">'
+        '<div class="main-title">🌍 AI Travel Concierge</div>'
+        '<div class="main-subtitle">'
+        'Your intelligent travel companion'
+        '</div>'
+        '<p>Plan smarter • Explore better • Travel easier</p>'
+        '</div>',
+        unsafe_allow_html=True
     )
 
-    st.caption(
-        "Your AI-powered personal travel assistant."
-    )
+    # -------------------------------------------------
+    # HOME SEARCH BAR
+    # -------------------------------------------------
 
     st.markdown(
-        """
-        ### ✈️ What can you do?
-
-        - 🏨 Search hotels
-        - 🌤️ Check current weather
-        - 🔎 Search travel information
-        - 📄 Ask questions from travel PDFs
-        - 🗺️ Generate AI travel itineraries
-        - 📜 View your search history
-        """
+        '<div class="section-title">'
+        '🔎 Where do you want to go?'
+        '</div>',
+        unsafe_allow_html=True
     )
 
-    st.info(
-        "💡 Select **Travel Assistant** "
-        "from the sidebar to start "
-        "planning your trip."
+    home_query = st.text_input(
+        "Ask anything about your trip",
+        placeholder="e.g. Best places to visit in Manali",
+        key="home_search"
     )
+
+    
+
+    if st.button(
+        "✨ Search with AI",
+        key="home_search_button"
+    ):
+
+        if home_query.strip():
+
+            save_search(home_query)
+
+            with st.spinner(
+                "Finding the best travel information..."
+            ):
+
+                try:
+
+                    response = base_agent_executor.invoke(
+                        {
+                            "input": home_query
+                        }
+                    )
+
+                    answer = response.get(
+                        "output",
+                        ""
+                    )
+
+                    st.divider()
+
+                    st.subheader(
+                        "🤖 AI Travel Assistant"
+                    )
+
+                    if answer:
+
+                        st.markdown(answer)
+                        auto_scroll_to_answer()
+
+                    else:
+
+                        st.warning(
+                            "⚠️ The AI returned an empty answer."
+                        )
+
+                except Exception as e:
+
+                    st.error(
+                        f"❌ Assistant error: {e}"
+                    )
+
+        else:
+
+            st.warning(
+                "Please enter a travel question."
+            )
+
+
+    st.divider()
+
+    st.markdown(
+        '<div class="section-title">'
+        '✈️ Everything You Need for Your Trip'
+        '</div>',
+        unsafe_allow_html=True
+    )
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown(
+            """
+            <div class="feature-card">
+                <h3>🏨 Hotel Search</h3>
+                <p>
+                Find hotels in your destination
+                with our travel search tool.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    with col2:
+        st.markdown(
+            """
+            <div class="feature-card">
+                <h3>🌤️ Live Weather</h3>
+                <p>
+                Check current weather conditions
+                for your destination.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    with col3:
+        st.markdown(
+            """
+            <div class="feature-card">
+                <h3>🔎 Travel Search</h3>
+                <p>
+                Get useful and latest travel
+                information from the web.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+
+    col4, col5, col6 = st.columns(3)
+
+    with col4:
+        st.markdown(
+            """
+            <div class="feature-card">
+                <h3>📄 PDF Assistant</h3>
+                <p>
+                Upload a travel guide and ask
+                questions from your document.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    with col5:
+        st.markdown(
+            """
+            <div class="feature-card">
+                <h3>🗺️ AI Itinerary</h3>
+                <p>
+                Generate practical day-by-day
+                travel plans using AI.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    with col6:
+        st.markdown(
+            """
+            <div class="feature-card">
+                <h3>📜 Search History</h3>
+                <p>
+                Easily view your previous
+                travel searches.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
 
     st.divider()
 
     st.success(
-        "✅ AI Travel Concierge is ready!"
+        "✨ Your AI Travel Concierge is ready!"
+    )
+
+    st.info(
+        "💡 Use the search bar above for a quick answer, "
+        "or choose **Travel Assistant** for PDF and itinerary features."
     )
 
 
@@ -507,12 +802,12 @@ elif page == "💬 Travel Assistant":
         "'Best places to visit in Manali'."
     )
 
-    st.divider()
-
 
     # =================================================
     # PDF UPLOAD
     # =================================================
+
+    st.divider()
 
     st.subheader(
         "📄 Travel Guide"
@@ -535,12 +830,19 @@ elif page == "💬 Travel Assistant":
     )
 
 
-    retriever = None
-    pdf_tool = None
+    # =================================================
+    # CREATE TOOLS
+    # =================================================
+
+    tools = [
+        web_tool,
+        weather_tool,
+        hotel_tool
+    ]
 
 
     # =================================================
-    # PROCESS PDF
+    # PDF PROCESSING
     # =================================================
 
     if uploaded_file is not None:
@@ -578,7 +880,7 @@ elif page == "💬 Travel Assistant":
         )
 
 
-        # Gemini Embeddings
+        # Embeddings
 
         embeddings = (
             GoogleGenerativeAIEmbeddings(
@@ -588,7 +890,7 @@ elif page == "💬 Travel Assistant":
         )
 
 
-        # FAISS Vector Store
+        # Vector Store
 
         vectorstore = FAISS.from_documents(
             documents=chunks,
@@ -598,18 +900,14 @@ elif page == "💬 Travel Assistant":
 
         # Retriever
 
-        retriever = (
-            vectorstore.as_retriever(
-                search_kwargs={
-                    "k": 3
-                }
-            )
+        retriever = vectorstore.as_retriever(
+            search_kwargs={
+                "k": 3
+            }
         )
 
 
-        # =============================================
-        # PDF SEARCH FUNCTION
-        # =============================================
+        # PDF Search
 
         def pdf_search(query):
 
@@ -630,9 +928,7 @@ elif page == "💬 Travel Assistant":
             )
 
 
-        # =============================================
-        # PDF TOOL
-        # =============================================
+        # PDF Tool
 
         pdf_tool = Tool(
             name="pdf_search",
@@ -644,11 +940,9 @@ elif page == "💬 Travel Assistant":
         )
 
 
-        if pdf_tool not in tools:
-
-            tools.append(
-                pdf_tool
-            )
+        tools.append(
+            pdf_tool
+        )
 
 
         st.success(
@@ -656,8 +950,7 @@ elif page == "💬 Travel Assistant":
         )
 
         st.write(
-            f"**Total Chunks:** "
-            f"{len(chunks)}"
+            f"**Total Chunks:** {len(chunks)}"
         )
 
         st.subheader(
@@ -674,7 +967,7 @@ elif page == "💬 Travel Assistant":
     # CREATE AGENT
     # =================================================
 
-    prompt = ChatPromptTemplate.from_messages(
+    agent_prompt = ChatPromptTemplate.from_messages(
         [
 
             (
@@ -683,7 +976,7 @@ elif page == "💬 Travel Assistant":
                 """
 You are an AI Travel Concierge.
 
-You have access to the following tools:
+You have access to these tools:
 
 1. Web Search
    - Use for latest travel information,
@@ -707,6 +1000,8 @@ before answering.
 
 If no tool is required,
 answer normally.
+
+Give clear and useful answers.
 """
             ),
 
@@ -725,7 +1020,7 @@ answer normally.
     agent = create_tool_calling_agent(
         llm=llm,
         tools=tools,
-        prompt=prompt,
+        prompt=agent_prompt,
     )
 
 
@@ -737,7 +1032,7 @@ answer normally.
 
 
     # =================================================
-    # AI ITINERARY GENERATOR
+    # ITINERARY
     # =================================================
 
     st.divider()
@@ -780,11 +1075,9 @@ answer normally.
                 "Creating your itinerary..."
             ):
 
-                itinerary = (
-                    generate_itinerary(
-                        destination,
-                        days
-                    )
+                itinerary = generate_itinerary(
+                    destination,
+                    days
                 )
 
 
@@ -824,7 +1117,7 @@ answer normally.
 
 
     # =================================================
-    # CHAT INTERFACE
+    # CHAT
     # =================================================
 
     st.divider()
@@ -843,7 +1136,6 @@ answer normally.
         save_search(
             user_input
         )
-
 
         st.chat_message(
             "user"
@@ -867,20 +1159,41 @@ answer normally.
                 )
 
 
+                answer = response.get(
+                    "output",
+                    ""
+                )
+
+
                 with st.chat_message(
                     "assistant"
                 ):
 
-                    st.markdown(
-                        response["output"]
-                    )
+                    if answer:
+
+                        st.markdown(
+                            answer
+                        )
+
+                        auto_scroll_to_answer()
+
+                    else:
+
+                        st.warning(
+                            "⚠️ The AI returned "
+                            "an empty answer."
+                        )
 
 
             except Exception as e:
 
-                st.error(
-                    f"❌ {e}"
-                )
+                with st.chat_message(
+                    "assistant"
+                ):
+
+                    st.error(
+                        f"❌ Assistant error: {e}"
+                    )
 
 
 # =====================================================
@@ -889,30 +1202,42 @@ answer normally.
 
 elif page == "📜 Search History":
 
-    st.title(
-        "📜 Search History"
+    st.markdown(
+        '<div class="main-title">📜 Search History</div>',
+        unsafe_allow_html=True
     )
+
+    st.markdown(
+        '<div class="main-subtitle">'
+        'Your recent travel searches'
+        '</div>',
+        unsafe_allow_html=True
+    )
+
+    st.divider()
 
     history = get_history()
 
-
     if history:
 
-        for query, created_at in history:
+        st.info(
+            f"🔎 You have {len(history)} saved searches."
+        )
+
+        for i, (query, created_at) in enumerate(history):
 
             st.markdown(
-                f"🕒 **{created_at}**"
+                f"""
+                <div class="feature-card">
+                    <h4>🔎 {query}</h4>
+                    <p>🕒 {created_at}</p>
+                </div>
+                """,
+                unsafe_allow_html=True
             )
-
-            st.write(
-                f"🔍 {query}"
-            )
-
-            st.divider()
-
 
     else:
 
         st.info(
-            "No search history found."
-        )
+            "📭 No search history found yet."
+        
