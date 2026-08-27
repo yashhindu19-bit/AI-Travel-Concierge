@@ -1240,4 +1240,4 @@ elif page == "📜 Search History":
 
         st.info(
             "📭 No search history found yet."
-        
+        )             
