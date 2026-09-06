@@ -5,10 +5,19 @@ import requests
 import asyncio
 import sqlite3
 
+# =====================================================
+# ASYNCIO FIX
+# =====================================================
+
 try:
     asyncio.get_event_loop()
 except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
+
+
+# =====================================================
+# IMPORTS
+# =====================================================
 
 from dotenv import load_dotenv
 
@@ -71,6 +80,7 @@ st.markdown("""
     border-radius: 20px;
     text-align: center;
     margin-bottom: 25px;
+    border: 1px solid rgba(128,128,128,0.20);
 }
 
 .feature-card {
@@ -82,12 +92,14 @@ st.markdown("""
 }
 
 .feature-card h3 {
+    margin-top: 0;
     margin-bottom: 8px;
 }
 
 .feature-card p {
     font-size: 14px;
     opacity: 0.8;
+    margin-bottom: 0;
 }
 
 .section-title {
@@ -196,7 +208,66 @@ llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash",
     google_api_key=GEMINI_API_KEY,
     temperature=0.3,
+    timeout=30,
+    max_retries=0,
 )
+
+
+# =====================================================
+# AI ERROR HANDLER
+# =====================================================
+
+def show_ai_error(error):
+
+    error_text = str(error).lower()
+
+    if (
+        "503" in error_text
+        or "service unavailable" in error_text
+        or "high demand" in error_text
+        or "temporarily unavailable" in error_text
+    ):
+
+        st.warning(
+            "⚠️ Gemini AI is temporarily unavailable "
+            "because the model is experiencing high demand. "
+            "Please wait a little and try again."
+        )
+
+    elif (
+        "429" in error_text
+        or "resource exhausted" in error_text
+        or "too many requests" in error_text
+    ):
+
+        st.warning(
+            "⚠️ Too many AI requests were made. "
+            "Please wait a little and try again."
+        )
+
+    elif (
+        "401" in error_text
+        or "api key" in error_text
+        or "authentication" in error_text
+    ):
+
+        st.error(
+            "❌ Gemini API key problem. "
+            "Please check your GEMINI_API_KEY."
+        )
+
+    elif "timeout" in error_text:
+
+        st.warning(
+            "⏱️ AI request timed out. "
+            "Please try the question again."
+        )
+
+    else:
+
+        st.error(
+            f"❌ Assistant error: {error}"
+        )
 
 
 # =====================================================
@@ -287,7 +358,9 @@ def hotel_search(city):
 
     try:
 
-        # Find city in India
+        # ---------------------------------------------
+        # FIND CITY
+        # ---------------------------------------------
 
         geo_url = (
             "https://api.geoapify.com/"
@@ -325,7 +398,9 @@ def hotel_search(city):
         lon = location["lon"]
 
 
-        # Search hotels
+        # ---------------------------------------------
+        # SEARCH HOTELS
+        # ---------------------------------------------
 
         hotel_url = (
             "https://api.geoapify.com/v2/places"
@@ -411,6 +486,7 @@ for {city}.
 For each day include:
 
 ### Day X
+
 - Morning activities
 - Afternoon activities
 - Evening activities
@@ -428,13 +504,48 @@ Do not invent exact ticket prices or opening hours.
             prompt
         )
 
+        if not response.content:
+
+            return (
+                "⚠️ The AI returned an empty answer."
+            )
+
         return response.content
 
     except Exception as e:
 
+        error_text = str(e).lower()
+
+        if (
+            "503" in error_text
+            or "high demand" in error_text
+        ):
+
+            return (
+                "⚠️ Gemini AI is temporarily "
+                "experiencing high demand. "
+                "Please try again later."
+            )
+
+        if (
+            "429" in error_text
+            or "resource exhausted" in error_text
+        ):
+
+            return (
+                "⚠️ Gemini API request limit "
+                "was reached. Please wait and try again."
+            )
+
+        if "timeout" in error_text:
+
+            return (
+                "⏱️ Itinerary generation timed out. "
+                "Please try again."
+            )
+
         return (
-            f"❌ Unable to generate "
-            f"itinerary: {e}"
+            f"❌ Unable to generate itinerary: {e}"
         )
 
 
@@ -481,10 +592,12 @@ base_tools = [
     hotel_tool,
 ]
 
+
 base_agent_prompt = ChatPromptTemplate.from_messages(
     [
         (
             "system",
+
             """
 You are an AI Travel Concierge.
 
@@ -496,7 +609,7 @@ You have access to these tools:
 
 2. Weather Search
    - Use for current weather
-     of any city.
+     of a city.
 
 3. Hotel Search
    - Use for finding hotels
@@ -509,21 +622,25 @@ If a tool is needed, use the
 appropriate tool before answering.
 """
         ),
+
         (
             "human",
             "{input}"
         ),
+
         MessagesPlaceholder(
             variable_name="agent_scratchpad"
         ),
     ]
 )
 
+
 base_agent = create_tool_calling_agent(
     llm=llm,
     tools=base_tools,
     prompt=base_agent_prompt,
 )
+
 
 base_agent_executor = AgentExecutor(
     agent=base_agent,
@@ -533,26 +650,35 @@ base_agent_executor = AgentExecutor(
 
 
 # =====================================================
-# AUTO SCROLL HELPER
+# AUTO SCROLL
 # =====================================================
 
 def auto_scroll_to_answer():
+
     st.components.v1.html(
         """
         <script>
+
         setTimeout(function() {
+
             try {
+
                 window.parent.scrollTo({
                     top: document.body.scrollHeight,
                     behavior: "smooth"
                 });
+
             } catch (e) {
+
                 window.scrollTo({
                     top: document.body.scrollHeight,
                     behavior: "smooth"
                 });
+
             }
+
         }, 300);
+
         </script>
         """,
         height=0,
@@ -583,20 +709,32 @@ with st.sidebar:
 
 if page == "🏠 Home":
 
-    st.markdown(
-        '<div class="hero">'
-        '<div class="main-title">🌍 AI Travel Concierge</div>'
-        '<div class="main-subtitle">'
-        'Your intelligent travel companion'
-        '</div>'
-        '<p>Plan smarter • Explore better • Travel easier</p>'
-        '</div>',
-        unsafe_allow_html=True
-    )
+    # -----------------------------------------------
+    # HERO
+    # -----------------------------------------------
 
-    # -------------------------------------------------
-    # HOME SEARCH BAR
-    # -------------------------------------------------
+    st.html("""
+    <div class="hero">
+
+        <div class="main-title">
+            🌍 AI Travel Concierge
+        </div>
+
+        <div class="main-subtitle">
+            Your intelligent travel companion
+        </div>
+
+        <p>
+            Plan smarter • Explore better • Travel easier
+        </p>
+
+    </div>
+    """)
+
+
+    # -----------------------------------------------
+    # SEARCH
+    # -----------------------------------------------
 
     st.markdown(
         '<div class="section-title">'
@@ -605,13 +743,17 @@ if page == "🏠 Home":
         unsafe_allow_html=True
     )
 
+
     home_query = st.text_input(
         "Ask anything about your trip",
-        placeholder="e.g. Best places to visit in Manali",
+
+        placeholder=(
+            "e.g. Best places to visit in Manali"
+        ),
+
         key="home_search"
     )
 
-    
 
     if st.button(
         "✨ Search with AI",
@@ -620,7 +762,10 @@ if page == "🏠 Home":
 
         if home_query.strip():
 
-            save_search(home_query)
+            save_search(
+                home_query
+            )
+
 
             with st.spinner(
                 "Finding the best travel information..."
@@ -628,39 +773,50 @@ if page == "🏠 Home":
 
                 try:
 
-                    response = base_agent_executor.invoke(
-                        {
-                            "input": home_query
-                        }
+                    response = (
+                        base_agent_executor.invoke(
+                            {
+                                "input":
+                                    home_query
+                            }
+                        )
                     )
+
 
                     answer = response.get(
                         "output",
                         ""
                     )
 
+
                     st.divider()
+
 
                     st.subheader(
                         "🤖 AI Travel Assistant"
                     )
 
+
                     if answer:
 
-                        st.markdown(answer)
+                        st.markdown(
+                            answer
+                        )
+
                         auto_scroll_to_answer()
 
                     else:
 
                         st.warning(
-                            "⚠️ The AI returned an empty answer."
+                            "⚠️ The AI returned "
+                            "an empty answer."
                         )
+
 
                 except Exception as e:
 
-                    st.error(
-                        f"❌ Assistant error: {e}"
-                    )
+                    show_ai_error(e)
+
 
         else:
 
@@ -669,7 +825,12 @@ if page == "🏠 Home":
             )
 
 
+    # -----------------------------------------------
+    # FEATURES
+    # -----------------------------------------------
+
     st.divider()
+
 
     st.markdown(
         '<div class="section-title">'
@@ -678,105 +839,133 @@ if page == "🏠 Home":
         unsafe_allow_html=True
     )
 
+
+    # -----------------------------------------------
+    # FIRST ROW
+    # -----------------------------------------------
+
     col1, col2, col3 = st.columns(3)
 
+
     with col1:
-        st.markdown(
-            """
-            <div class="feature-card">
-                <h3>🏨 Hotel Search</h3>
-                <p>
-                Find hotels in your destination
-                with our travel search tool.
-                </p>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+
+        st.html("""
+        <div class="feature-card">
+
+            <h3>🏨 Hotel Search</h3>
+
+            <p>
+            Find hotels in your destination
+            with our travel search tool.
+            </p>
+
+        </div>
+        """)
+
 
     with col2:
-        st.markdown(
-            """
-            <div class="feature-card">
-                <h3>🌤️ Live Weather</h3>
-                <p>
-                Check current weather conditions
-                for your destination.
-                </p>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+
+        st.html("""
+        <div class="feature-card">
+
+            <h3>🌤️ Live Weather</h3>
+
+            <p>
+            Check current weather conditions
+            for your destination.
+            </p>
+
+        </div>
+        """)
+
 
     with col3:
-        st.markdown(
-            """
-            <div class="feature-card">
-                <h3>🔎 Travel Search</h3>
-                <p>
-                Get useful and latest travel
-                information from the web.
-                </p>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
 
+        st.html("""
+        <div class="feature-card">
+
+            <h3>🔎 Travel Search</h3>
+
+            <p>
+            Get useful and latest travel
+            information from the web.
+            </p>
+
+        </div>
+        """)
+
+
+    # -----------------------------------------------
+    # SECOND ROW
+    # -----------------------------------------------
 
     col4, col5, col6 = st.columns(3)
 
+
     with col4:
-        st.markdown(
-            """
-            <div class="feature-card">
-                <h3>📄 PDF Assistant</h3>
-                <p>
-                Upload a travel guide and ask
-                questions from your document.
-                </p>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+
+        st.html("""
+        <div class="feature-card">
+
+            <h3>📄 PDF Assistant</h3>
+
+            <p>
+            Upload a travel guide and ask
+            questions from your document.
+            </p>
+
+        </div>
+        """)
+
 
     with col5:
-        st.markdown(
-            """
-            <div class="feature-card">
-                <h3>🗺️ AI Itinerary</h3>
-                <p>
-                Generate practical day-by-day
-                travel plans using AI.
-                </p>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+
+        st.html("""
+        <div class="feature-card">
+
+            <h3>🗺️ AI Itinerary</h3>
+
+            <p>
+            Generate practical day-by-day
+            travel plans using AI.
+            </p>
+
+        </div>
+        """)
+
 
     with col6:
-        st.markdown(
-            """
-            <div class="feature-card">
-                <h3>📜 Search History</h3>
-                <p>
-                Easily view your previous
-                travel searches.
-                </p>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
 
+        st.html("""
+        <div class="feature-card">
+
+            <h3>📜 Search History</h3>
+
+            <p>
+            Easily view your previous
+            travel searches.
+            </p>
+
+        </div>
+        """)
+
+
+    # -----------------------------------------------
+    # FOOTER INFO
+    # -----------------------------------------------
 
     st.divider()
+
 
     st.success(
         "✨ Your AI Travel Concierge is ready!"
     )
 
+
     st.info(
         "💡 Use the search bar above for a quick answer, "
-        "or choose **Travel Assistant** for PDF and itinerary features."
+        "or choose **Travel Assistant** for PDF and "
+        "itinerary features."
     )
 
 
@@ -790,11 +979,12 @@ elif page == "💬 Travel Assistant":
         "💬 Travel Assistant"
     )
 
+
     st.caption(
-        "Ask about hotels, weather, "
-        "destinations, itineraries, "
-        "or your uploaded travel PDF."
+        "Ask about hotels, weather, destinations, "
+        "itineraries, or your uploaded travel PDF."
     )
+
 
     st.info(
         "💡 Try: 'Find hotels in Delhi', "
@@ -809,29 +999,34 @@ elif page == "💬 Travel Assistant":
 
     st.divider()
 
+
     st.subheader(
         "📄 Travel Guide"
     )
 
+
     st.caption(
-        "Upload a travel guide PDF to "
-        "get answers directly from "
-        "your document."
+        "Upload a travel guide PDF to get answers "
+        "directly from your document."
     )
+
 
     uploaded_file = st.file_uploader(
         "Choose a PDF file",
+
         type=["pdf"],
+
         help=(
             "Upload your travel guide "
             "in PDF format."
         ),
+
         key="travel_pdf"
     )
 
 
     # =================================================
-    # CREATE TOOLS
+    # TOOLS
     # =================================================
 
     tools = [
@@ -847,133 +1042,180 @@ elif page == "💬 Travel Assistant":
 
     if uploaded_file is not None:
 
-        with tempfile.NamedTemporaryFile(
-            delete=False,
-            suffix=".pdf"
-        ) as tmp_file:
+        try:
 
-            tmp_file.write(
-                uploaded_file.getvalue()
-            )
+            with tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=".pdf"
+            ) as tmp_file:
 
-            pdf_path = tmp_file.name
-
-
-        # Load PDF
-
-        loader = PyPDFLoader(
-            pdf_path
-        )
-
-        documents = loader.load()
-
-
-        # Split PDF
-
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200
-        )
-
-        chunks = splitter.split_documents(
-            documents
-        )
-
-
-        # Embeddings
-
-        embeddings = (
-            GoogleGenerativeAIEmbeddings(
-                model="gemini-embedding-001",
-                google_api_key=GEMINI_API_KEY
-            )
-        )
-
-
-        # Vector Store
-
-        vectorstore = FAISS.from_documents(
-            documents=chunks,
-            embedding=embeddings
-        )
-
-
-        # Retriever
-
-        retriever = vectorstore.as_retriever(
-            search_kwargs={
-                "k": 3
-            }
-        )
-
-
-        # PDF Search
-
-        def pdf_search(query):
-
-            docs = retriever.invoke(
-                query
-            )
-
-            if not docs:
-
-                return (
-                    "No relevant information "
-                    "found in the uploaded PDF."
+                tmp_file.write(
+                    uploaded_file.getvalue()
                 )
 
-            return "\n\n".join(
-                doc.page_content
-                for doc in docs
+                pdf_path = tmp_file.name
+
+
+            # -----------------------------------------
+            # LOAD PDF
+            # -----------------------------------------
+
+            loader = PyPDFLoader(
+                pdf_path
+            )
+
+            documents = loader.load()
+
+
+            # -----------------------------------------
+            # SPLIT PDF
+            # -----------------------------------------
+
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=1000,
+                chunk_overlap=200
             )
 
 
-        # PDF Tool
-
-        pdf_tool = Tool(
-            name="pdf_search",
-            func=pdf_search,
-            description=(
-                "Search information from "
-                "the uploaded travel PDF."
+            chunks = splitter.split_documents(
+                documents
             )
-        )
 
 
-        tools.append(
-            pdf_tool
-        )
+            # -----------------------------------------
+            # EMBEDDINGS
+            # -----------------------------------------
+
+            embeddings = (
+                GoogleGenerativeAIEmbeddings(
+                    model="gemini-embedding-001",
+                    google_api_key=GEMINI_API_KEY
+                )
+            )
 
 
-        st.success(
-            "✅ PDF uploaded successfully!"
-        )
+            # -----------------------------------------
+            # VECTOR STORE
+            # -----------------------------------------
 
-        st.write(
-            f"**Total Chunks:** {len(chunks)}"
-        )
+            vectorstore = FAISS.from_documents(
+                documents=chunks,
+                embedding=embeddings
+            )
 
-        st.subheader(
-            "📄 PDF Preview"
-        )
 
-        st.write(
-            documents[0]
-            .page_content[:700]
-        )
+            # -----------------------------------------
+            # RETRIEVER
+            # -----------------------------------------
+
+            retriever = (
+                vectorstore.as_retriever(
+                    search_kwargs={
+                        "k": 3
+                    }
+                )
+            )
+
+
+            # -----------------------------------------
+            # PDF SEARCH
+            # -----------------------------------------
+
+            def pdf_search(query):
+
+                try:
+
+                    docs = retriever.invoke(
+                        query
+                    )
+
+                    if not docs:
+
+                        return (
+                            "No relevant information "
+                            "found in the uploaded PDF."
+                        )
+
+                    return "\n\n".join(
+                        doc.page_content
+                        for doc in docs
+                    )
+
+                except Exception as e:
+
+                    return (
+                        f"PDF search error: {e}"
+                    )
+
+
+            # -----------------------------------------
+            # PDF TOOL
+            # -----------------------------------------
+
+            pdf_tool = Tool(
+                name="pdf_search",
+
+                func=pdf_search,
+
+                description=(
+                    "Search information from "
+                    "the uploaded travel PDF."
+                )
+            )
+
+
+            tools.append(
+                pdf_tool
+            )
+
+
+            st.success(
+                "✅ PDF uploaded successfully!"
+            )
+
+
+            st.write(
+                f"**Total Chunks:** "
+                f"{len(chunks)}"
+            )
+
+
+            # -----------------------------------------
+            # PDF PREVIEW
+            # -----------------------------------------
+
+            st.subheader(
+                "📄 PDF Preview"
+            )
+
+
+            if documents:
+
+                st.write(
+                    documents[0]
+                    .page_content[:700]
+                )
+
+
+        except Exception as e:
+
+            st.error(
+                f"❌ PDF processing error: {e}"
+            )
 
 
     # =================================================
-    # CREATE AGENT
+    # TRAVEL AGENT
     # =================================================
 
-    agent_prompt = ChatPromptTemplate.from_messages(
-        [
+    agent_prompt = (
+        ChatPromptTemplate.from_messages(
+            [
 
-            (
-                "system",
+                (
+                    "system",
 
-                """
+                    """
 You are an AI Travel Concierge.
 
 You have access to these tools:
@@ -984,7 +1226,7 @@ You have access to these tools:
 
 2. Weather Search
    - Use for current weather
-     of any city.
+     of a city.
 
 3. Hotel Search
    - Use for finding hotels
@@ -1003,17 +1245,19 @@ answer normally.
 
 Give clear and useful answers.
 """
-            ),
+                ),
 
-            (
-                "human",
-                "{input}"
-            ),
+                (
+                    "human",
+                    "{input}"
+                ),
 
-            MessagesPlaceholder(
-                variable_name="agent_scratchpad"
-            ),
-        ]
+                MessagesPlaceholder(
+                    variable_name="agent_scratchpad"
+                ),
+
+            ]
+        )
     )
 
 
@@ -1032,14 +1276,16 @@ Give clear and useful answers.
 
 
     # =================================================
-    # ITINERARY
+    # AI ITINERARY
     # =================================================
 
     st.divider()
 
+
     st.subheader(
         "🗺️ AI Itinerary Generator"
     )
+
 
     col1, col2 = st.columns(2)
 
@@ -1048,7 +1294,9 @@ Give clear and useful answers.
 
         destination = st.text_input(
             "📍 Destination",
+
             placeholder="e.g. Jaipur",
+
             key="itinerary_destination"
         )
 
@@ -1057,15 +1305,20 @@ Give clear and useful answers.
 
         days = st.number_input(
             "📅 Number of Days",
+
             min_value=1,
+
             max_value=15,
+
             value=3,
+
             key="itinerary_days"
         )
 
 
     if st.button(
         "✨ Generate Itinerary",
+
         key="generate_itinerary_button"
     ):
 
@@ -1081,32 +1334,63 @@ Give clear and useful answers.
                 )
 
 
-            st.success(
-                "✅ Itinerary generated!"
-            )
+            if itinerary.startswith(
+                "⚠️"
+            ):
 
-            st.markdown(
-                itinerary
-            )
+                st.warning(
+                    itinerary
+                )
+
+            elif itinerary.startswith(
+                "❌"
+            ):
+
+                st.error(
+                    itinerary
+                )
+
+            elif itinerary.startswith(
+                "⏱️"
+            ):
+
+                st.warning(
+                    itinerary
+                )
+
+            else:
+
+                st.success(
+                    "✅ Itinerary generated!"
+                )
 
 
-            save_search(
-                f"Itinerary: "
-                f"{destination} - "
-                f"{days} days"
-            )
+                st.markdown(
+                    itinerary
+                )
 
 
-            st.download_button(
-                label="📥 Download Itinerary",
-                data=itinerary,
-                file_name=(
-                    f"{destination}_"
-                    f"itinerary.txt"
-                ),
-                mime="text/plain",
-                key="download_itinerary"
-            )
+                save_search(
+                    f"Itinerary: "
+                    f"{destination} - "
+                    f"{days} days"
+                )
+
+
+                st.download_button(
+                    label="📥 Download Itinerary",
+
+                    data=itinerary,
+
+                    file_name=(
+                        f"{destination}_"
+                        f"itinerary.txt"
+                    ),
+
+                    mime="text/plain",
+
+                    key="download_itinerary"
+                )
 
 
         else:
@@ -1122,9 +1406,11 @@ Give clear and useful answers.
 
     st.divider()
 
+
     st.subheader(
         "💬 Ask Your Travel Question"
     )
+
 
     user_input = st.chat_input(
         "Ask your travel question..."
@@ -1136,6 +1422,7 @@ Give clear and useful answers.
         save_search(
             user_input
         )
+
 
         st.chat_message(
             "user"
@@ -1153,7 +1440,8 @@ Give clear and useful answers.
                 response = (
                     agent_executor.invoke(
                         {
-                            "input": user_input
+                            "input":
+                                user_input
                         }
                     )
                 )
@@ -1181,7 +1469,8 @@ Give clear and useful answers.
 
                         st.warning(
                             "⚠️ The AI returned "
-                            "an empty answer."
+                            "an empty answer. "
+                            "Please try again."
                         )
 
 
@@ -1191,9 +1480,7 @@ Give clear and useful answers.
                     "assistant"
                 ):
 
-                    st.error(
-                        f"❌ Assistant error: {e}"
-                    )
+                    show_ai_error(e)
 
 
 # =====================================================
@@ -1203,9 +1490,12 @@ Give clear and useful answers.
 elif page == "📜 Search History":
 
     st.markdown(
-        '<div class="main-title">📜 Search History</div>',
+        '<div class="main-title">'
+        '📜 Search History'
+        '</div>',
         unsafe_allow_html=True
     )
+
 
     st.markdown(
         '<div class="main-subtitle">'
@@ -1214,30 +1504,45 @@ elif page == "📜 Search History":
         unsafe_allow_html=True
     )
 
+
     st.divider()
 
+
     history = get_history()
+
 
     if history:
 
         st.info(
-            f"🔎 You have {len(history)} saved searches."
+            f"🔎 You have "
+            f"{len(history)} saved searches."
         )
 
-        for i, (query, created_at) in enumerate(history):
 
-            st.markdown(
+        for i, (
+            query,
+            created_at
+        ) in enumerate(history):
+
+            st.html(
                 f"""
                 <div class="feature-card">
-                    <h4>🔎 {query}</h4>
-                    <p>🕒 {created_at}</p>
+
+                    <h4>
+                        🔎 {query}
+                    </h4>
+
+                    <p>
+                        🕒 {created_at}
+                    </p>
+
                 </div>
-                """,
-                unsafe_allow_html=True
+                """
             )
+
 
     else:
 
         st.info(
             "📭 No search history found yet."
-        )             
+        )
